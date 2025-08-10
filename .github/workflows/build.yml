@@ -1,4 +1,4 @@
-name: Build and Publish Debian Package
+name: Build test
 
 on:
   push:
@@ -17,22 +17,19 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Install cargo-deb
-        run: cargo install cargo-deb
+      - name: Install dependencies
+        run: |
+          cargo install cargo-deb
+
+      - name: Build binary
+        run: |
+          cargo build
 
       - name: Build deb package
         run: |
           cargo deb
-          echo "deb_file=``" >> $GITHUB_ENV
 
-      - name: Archive Debian package
+      - name: Upload deb package to artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: forge-deb
           path: target/debian/*.deb
-
-      - name: Release
-        uses: softprops/action-gh-release@v2
-        if: github.ref_type == 'tag'
-        with:
-          files: target/debian/*.deb
