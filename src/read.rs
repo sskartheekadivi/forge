@@ -3,7 +3,7 @@ use std::io::{Read, Write};
 use std::os::unix::io::AsRawFd;
 use std::time::Instant;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use indicatif::{ProgressBar, ProgressStyle};
 use nix::ioctl_read;
 
@@ -14,7 +14,7 @@ ioctl_read!(blkgetsize64, 0x12, 114, u64);
 
 fn make_progress_bar(len: u64, prefix: &str) -> ProgressBar {
     let pb = ProgressBar::new(len);
-    pb.set_prefix(format!("{:<10}", prefix));
+    pb.set_prefix(format!("{prefix:<10}"));
     pb.set_style(
         ProgressStyle::default_bar()
             .template("{prefix} [{elapsed_precise}] [{bar:40.green/black}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta}) {msg}")
@@ -24,7 +24,10 @@ fn make_progress_bar(len: u64, prefix: &str) -> ProgressBar {
     pb
 }
 
-pub fn run(device_path: Option<std::path::PathBuf>, image_path: Option<std::path::PathBuf>) -> Result<()> {
+pub fn run(
+    device_path: Option<std::path::PathBuf>,
+    image_path: Option<std::path::PathBuf>,
+) -> Result<()> {
     let device_path = device_path.ok_or_else(|| anyhow!("Missing device argument"))?;
     let image_path = image_path.ok_or_else(|| anyhow!("Missing image argument"))?;
 
@@ -44,7 +47,7 @@ pub fn run(device_path: Option<std::path::PathBuf>, image_path: Option<std::path
     let fd = device_file.as_raw_fd();
     let mut size_bytes: u64 = 0;
     unsafe {
-        blkgetsize64(fd, &mut size_bytes)?; 
+        blkgetsize64(fd, &mut size_bytes)?;
     }
 
     if size_bytes == 0 {
@@ -71,7 +74,7 @@ pub fn run(device_path: Option<std::path::PathBuf>, image_path: Option<std::path
 
         // Pad write to file for O_DIRECT
         let padded_size = if to_read % block_size != 0 {
-            let pad = ((to_read + block_size - 1) / block_size) * block_size;
+            let pad = to_read.div_ceil(block_size) * block_size;
             buffer[to_read..pad].fill(0);
             pad
         } else {
@@ -89,11 +92,15 @@ pub fn run(device_path: Option<std::path::PathBuf>, image_path: Option<std::path
     let avg_speed = (size_bytes as f64 / (1024.0 * 1024.0)) / elapsed;
     read_pb.set_style(
         ProgressStyle::default_bar()
-            .template("{prefix} [{elapsed_precise}] [{bar:40.green/black}] {total_bytes} (avg {msg}")
+            .template(
+                "{prefix} [{elapsed_precise}] [{bar:40.green/black}] {total_bytes} (avg {msg}",
+            )
             .unwrap()
             .progress_chars("■ "),
     );
-    read_pb.finish_with_message(format!("{:.2} MiB/s, {:.1}s) ✅ Read complete.", avg_speed, elapsed));
+    read_pb.finish_with_message(format!(
+        "{avg_speed:.2} MiB/s, {elapsed:.1}s) ✅ Read complete."
+    ));
 
     let metadata = image_file.metadata()?;
     let actual_size = metadata.len();
@@ -106,4 +113,3 @@ pub fn run(device_path: Option<std::path::PathBuf>, image_path: Option<std::path
 
     Ok(())
 }
-

@@ -1,9 +1,9 @@
+use anyhow::{Result, anyhow};
 use clap::{Parser, Subcommand};
 use std::path::{Path, PathBuf};
-use anyhow::{Result, anyhow};
 
-mod write;
 mod read;
+mod write;
 
 #[derive(Parser)]
 #[command(name = "forge")]
@@ -43,7 +43,12 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Write { image, device, no_verify, .. } => {
+        Commands::Write {
+            image,
+            device,
+            no_verify,
+            ..
+        } => {
             let image = image.ok_or_else(|| anyhow!("Missing image argument"))?;
             let device = device.ok_or_else(|| anyhow!("Missing device argument"))?;
             write::run(&image, Path::new(&device), !no_verify)?;
@@ -55,4 +60,3 @@ fn main() -> Result<()> {
 
     Ok(())
 }
-

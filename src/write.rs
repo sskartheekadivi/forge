@@ -4,7 +4,7 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::time::Instant;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use indicatif::{ProgressBar, ProgressStyle};
 use sha2::{Digest, Sha256};
 
@@ -12,10 +12,10 @@ const BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
 
 fn make_progress_bar(len: u64, prefix: &str, color: &str) -> ProgressBar {
     let pb = ProgressBar::new(len);
-    pb.set_prefix(format!("{:<10}", prefix));
+    pb.set_prefix(format!("{prefix:<10}"));
     pb.set_style(
         ProgressStyle::default_bar()
-            .template(&format!("{{prefix}} [{{elapsed_precise}}] [{{bar:40.{}/black}}] {{bytes}}/{{total_bytes}} ({{bytes_per_sec}}, {{eta}}) {{msg}}", color))
+            .template(&format!("{{prefix}} [{{elapsed_precise}}] [{{bar:40.{color}/black}}] {{bytes}}/{{total_bytes}} ({{bytes_per_sec}}, {{eta}}) {{msg}}"))
             .unwrap()
             .progress_chars("■ "),
     );
@@ -53,7 +53,7 @@ pub fn run(image_path: &Path, device_path: &Path, verify: bool) -> Result<()> {
         image_file.read_exact(&mut buffer[..to_read])?;
 
         let padded_size = if to_read % block_size != 0 {
-            let pad = ((to_read + block_size - 1) / block_size) * block_size;
+            let pad = to_read.div_ceil(block_size) * block_size;
             buffer[to_read..pad].fill(0);
             pad
         } else {
@@ -71,11 +71,15 @@ pub fn run(image_path: &Path, device_path: &Path, verify: bool) -> Result<()> {
     let write_avg_speed = (image_len as f64 / (1024.0 * 1024.0)) / write_elapsed;
     write_pb.set_style(
         ProgressStyle::default_bar()
-            .template("{prefix} [{elapsed_precise}] [{bar:40.green/black}] {total_bytes} (avg {msg}")
+            .template(
+                "{prefix} [{elapsed_precise}] [{bar:40.green/black}] {total_bytes} (avg {msg}",
+            )
             .unwrap()
             .progress_chars("■ "),
     );
-    write_pb.finish_with_message(format!("{:6.2} MiB/s, {:5.1}s) ✅ Write complete.", write_avg_speed, write_elapsed));
+    write_pb.finish_with_message(format!(
+        "{write_avg_speed:6.2} MiB/s, {write_elapsed:5.1}s) ✅ Write complete."
+    ));
 
     println!();
 
@@ -120,7 +124,9 @@ pub fn run(image_path: &Path, device_path: &Path, verify: bool) -> Result<()> {
         );
 
         if hash1 == hash2 {
-            verify_pb.finish_with_message(format!("{:6.2} MiB/s, {:5.1}s) ✅ Verification successful.", verify_avg_speed, verify_elapsed));
+            verify_pb.finish_with_message(format!(
+                "{verify_avg_speed:6.2} MiB/s, {verify_elapsed:5.1}s) ✅ Verification successful."
+            ));
         } else {
             return Err(anyhow!(
                 "❌ Verification failed: hash mismatch. (avg {:.2} MiB/s)",
@@ -131,4 +137,3 @@ pub fn run(image_path: &Path, device_path: &Path, verify: bool) -> Result<()> {
 
     Ok(())
 }
-
