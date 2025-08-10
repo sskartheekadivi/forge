@@ -1,0 +1,38 @@
+name: Build and Publish Debian Package
+
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - 'v*'
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install cargo-deb
+        run: cargo install cargo-deb
+
+      - name: Build deb package
+        run: |
+          cargo deb
+          echo "deb_file=``" >> $GITHUB_ENV
+
+      - name: Archive Debian package
+        uses: actions/upload-artifact@v4
+        with:
+          name: forge-deb
+          path: target/debian/*.deb
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        if: github.ref_type == 'tag'
+        with:
+          files: target/debian/*.deb
