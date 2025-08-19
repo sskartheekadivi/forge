@@ -1,12 +1,17 @@
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+use tempfile::{NamedTempFile, TempPath};
 
 use anyhow::{Result, anyhow};
+use console::style;
+use flate2::read::GzDecoder;
 use indicatif::{ProgressBar, ProgressStyle};
 use sha2::{Digest, Sha256};
+use xz2::read::XzDecoder;
+use zstd::stream::read::Decoder as ZstdDecoder;
 
 const BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
 
@@ -22,6 +27,233 @@ fn make_progress_bar(len: u64, prefix: &str, color: &str) -> ProgressBar {
     pb
 }
 
+fn decompress_image(input_path: &Path) -> io::Result<TempPath> {
+    let ext = input_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    let input_file = File::open(input_path)?;
+
+    let mut reader: Box<dyn Read> = match ext.as_str() {
+        "gz" | "gzip" => Box::new(GzDecoder::new(BufReader::new(input_file))),
+        "xz" => Box::new(XzDecoder::new(BufReader::new(input_file))),
+        "zst" | "zstd" => Box::new(ZstdDecoder::new(BufReader::new(input_file))?),
+        _ => {
+            return Ok(TempPath::from_path(input_path));
+        }
+    };
+
+    let decompress_pb = ProgressBar::new_spinner();
+    decompress_pb.set_prefix("Decompress");
+    decompress_pb.set_style(
+        ProgressStyle::default_spinner()
+            .tick_strings(&[
+                &style("■  ■  ■  ■  ■  ■  ■                           ")
+                    .blue()
+                    .to_string(),
+                &style(" ■  ■  ■  ■  ■  ■  ■                          ")
+                    .blue()
+                    .to_string(),
+                &style("  ■  ■  ■  ■  ■  ■  ■                         ")
+                    .blue()
+                    .to_string(),
+                &style("   ■  ■  ■  ■  ■  ■  ■                        ")
+                    .blue()
+                    .to_string(),
+                &style("    ■  ■  ■  ■  ■  ■  ■                       ")
+                    .blue()
+                    .to_string(),
+                &style("     ■  ■  ■  ■  ■  ■  ■                      ")
+                    .blue()
+                    .to_string(),
+                &style("      ■  ■  ■  ■  ■  ■  ■                     ")
+                    .blue()
+                    .to_string(),
+                &style("       ■  ■  ■  ■  ■  ■  ■                    ")
+                    .blue()
+                    .to_string(),
+                &style("        ■  ■  ■  ■  ■  ■  ■                   ")
+                    .blue()
+                    .to_string(),
+                &style("         ■  ■  ■  ■  ■  ■  ■                  ")
+                    .blue()
+                    .to_string(),
+                &style("          ■  ■  ■  ■  ■  ■  ■                 ")
+                    .blue()
+                    .to_string(),
+                &style("           ■  ■  ■  ■  ■  ■  ■                ")
+                    .blue()
+                    .to_string(),
+                &style("            ■  ■  ■  ■  ■  ■  ■               ")
+                    .blue()
+                    .to_string(),
+                &style("             ■  ■  ■  ■  ■  ■  ■              ")
+                    .blue()
+                    .to_string(),
+                &style("              ■  ■  ■  ■  ■  ■  ■             ")
+                    .blue()
+                    .to_string(),
+                &style("               ■  ■  ■  ■  ■  ■  ■            ")
+                    .blue()
+                    .to_string(),
+                &style("                ■  ■  ■  ■  ■  ■  ■           ")
+                    .blue()
+                    .to_string(),
+                &style("                 ■  ■  ■  ■  ■  ■  ■          ")
+                    .blue()
+                    .to_string(),
+                &style("                  ■  ■  ■  ■  ■  ■  ■         ")
+                    .blue()
+                    .to_string(),
+                &style("                   ■  ■  ■  ■  ■  ■  ■        ")
+                    .blue()
+                    .to_string(),
+                &style("                    ■  ■  ■  ■  ■  ■  ■       ")
+                    .blue()
+                    .to_string(),
+                &style("                     ■  ■  ■  ■  ■  ■  ■      ")
+                    .blue()
+                    .to_string(),
+                &style("                      ■  ■  ■  ■  ■  ■  ■     ")
+                    .blue()
+                    .to_string(),
+                &style("                       ■  ■  ■  ■  ■  ■  ■    ")
+                    .blue()
+                    .to_string(),
+                &style("                        ■  ■  ■  ■  ■  ■  ■   ")
+                    .blue()
+                    .to_string(),
+                &style("                         ■  ■  ■  ■  ■  ■  ■  ")
+                    .blue()
+                    .to_string(),
+                &style("                          ■  ■  ■  ■  ■  ■  ■ ")
+                    .blue()
+                    .to_string(),
+                &style("                           ■  ■  ■  ■  ■  ■  ■")
+                    .blue()
+                    .to_string(),
+                &style("                          ■  ■  ■  ■  ■  ■  ■ ")
+                    .blue()
+                    .to_string(),
+                &style("                         ■  ■  ■  ■  ■  ■  ■  ")
+                    .blue()
+                    .to_string(),
+                &style("                        ■  ■  ■  ■  ■  ■  ■   ")
+                    .blue()
+                    .to_string(),
+                &style("                       ■  ■  ■  ■  ■  ■  ■    ")
+                    .blue()
+                    .to_string(),
+                &style("                      ■  ■  ■  ■  ■  ■  ■     ")
+                    .blue()
+                    .to_string(),
+                &style("                     ■  ■  ■  ■  ■  ■  ■      ")
+                    .blue()
+                    .to_string(),
+                &style("                    ■  ■  ■  ■  ■  ■  ■       ")
+                    .blue()
+                    .to_string(),
+                &style("                   ■  ■  ■  ■  ■  ■  ■        ")
+                    .blue()
+                    .to_string(),
+                &style("                  ■  ■  ■  ■  ■  ■  ■         ")
+                    .blue()
+                    .to_string(),
+                &style("                 ■  ■  ■  ■  ■  ■  ■          ")
+                    .blue()
+                    .to_string(),
+                &style("                ■  ■  ■  ■  ■  ■  ■           ")
+                    .blue()
+                    .to_string(),
+                &style("               ■  ■  ■  ■  ■  ■  ■            ")
+                    .blue()
+                    .to_string(),
+                &style("              ■  ■  ■  ■  ■  ■  ■             ")
+                    .blue()
+                    .to_string(),
+                &style("             ■  ■  ■  ■  ■  ■  ■              ")
+                    .blue()
+                    .to_string(),
+                &style("            ■  ■  ■  ■  ■  ■  ■               ")
+                    .blue()
+                    .to_string(),
+                &style("           ■  ■  ■  ■  ■  ■  ■                ")
+                    .blue()
+                    .to_string(),
+                &style("          ■  ■  ■  ■  ■  ■  ■                 ")
+                    .blue()
+                    .to_string(),
+                &style("         ■  ■  ■  ■  ■  ■  ■                  ")
+                    .blue()
+                    .to_string(),
+                &style("        ■  ■  ■  ■  ■  ■  ■                   ")
+                    .blue()
+                    .to_string(),
+                &style("       ■  ■  ■  ■  ■  ■  ■                    ")
+                    .blue()
+                    .to_string(),
+                &style("      ■  ■  ■  ■  ■  ■  ■                     ")
+                    .blue()
+                    .to_string(),
+                &style("     ■  ■  ■  ■  ■  ■  ■                      ")
+                    .blue()
+                    .to_string(),
+                &style("    ■  ■  ■  ■  ■  ■  ■                       ")
+                    .blue()
+                    .to_string(),
+                &style("   ■  ■  ■  ■  ■  ■  ■                        ")
+                    .blue()
+                    .to_string(),
+                &style("  ■  ■  ■  ■  ■  ■  ■                         ")
+                    .blue()
+                    .to_string(),
+                &style(" ■  ■  ■  ■  ■  ■  ■                          ")
+                    .blue()
+                    .to_string(),
+            ])
+            .template("{prefix} [{elapsed_precise}] [{spinner}] {bytes} ({bytes_per_sec}) {msg}")
+            .unwrap(),
+    );
+    decompress_pb.enable_steady_tick(Duration::from_millis(100));
+
+    let mut temp_file = NamedTempFile::new()?;
+    {
+        let mut writer = BufWriter::new(&mut temp_file);
+        let mut buffer = [0u8; 8192];
+        let mut total: u64 = 0;
+
+        loop {
+            let n = reader.read(&mut buffer)?;
+            if n == 0 {
+                break;
+            }
+            writer.write_all(&buffer[..n])?;
+            total += n as u64;
+            decompress_pb.set_position(total);
+        }
+        writer.flush()?;
+    }
+
+    decompress_pb.set_style(
+        indicatif::ProgressStyle::with_template(
+            "Decompress [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes} ({bytes_per_sec}) {msg}",
+        )
+        .unwrap()
+        .progress_chars("■■"),
+    );
+
+    // Force the bar to full by syncing position to length (but keep counters!)
+    if let Some(len) = decompress_pb.length() {
+        decompress_pb.set_position(len);
+    }
+
+    decompress_pb.finish_with_message("✅ Decompression complete.");
+
+    Ok(temp_file.into_temp_path())
+}
+
 pub fn run(image_path: &Path, device_path: &Path, verify: bool) -> Result<()> {
     println!(
         "Writing image \"{}\" to device \"{}\"",
@@ -29,8 +261,8 @@ pub fn run(image_path: &Path, device_path: &Path, verify: bool) -> Result<()> {
         device_path.display()
     );
 
-    // --- Writing ---
-    let mut image_file = File::open(image_path)?;
+    let temp_path = decompress_image(image_path)?;
+    let mut image_file = File::open(&temp_path)?;
     let image_len = image_file.metadata()?.len();
 
     let mut device_file = std::fs::OpenOptions::new()
@@ -85,7 +317,7 @@ pub fn run(image_path: &Path, device_path: &Path, verify: bool) -> Result<()> {
 
     // --- Verification ---
     if verify {
-        let mut image_file = File::open(image_path)?;
+        let mut image_file = File::open(temp_path)?;
         let mut device_file = File::open(device_path)?;
 
         let verify_pb = make_progress_bar(image_len, "Verifying", "magenta");
