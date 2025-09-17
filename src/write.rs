@@ -1,4 +1,4 @@
-use std::fs::File;
+use std::fs::{File, copy};
 use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
@@ -41,7 +41,15 @@ fn decompress_image(input_path: &Path) -> io::Result<TempPath> {
         "xz" => Box::new(XzDecoder::new(BufReader::new(input_file))),
         "zst" | "zstd" => Box::new(ZstdDecoder::new(BufReader::new(input_file))?),
         _ => {
-            return Ok(TempPath::from_path(input_path));
+		let tmp_file = NamedTempFile::new()?;
+		let tmp_path = tmp_file.path().to_owned(); // Get the path
+
+		// Copy the source file to the temp file path
+		copy(input_path, &tmp_path)?;
+
+		// Re-open the temp file to return it (since NamedTempFile is still open and valid)
+		// If you use tmp_file directly, it still points to the temp file on disk
+		return Ok(tmp_file.into_temp_path())
         }
     };
 
