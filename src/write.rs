@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::os::unix::fs::OpenOptionsExt;
-use std::path::{Path, PathBuf}; // Added PathBuf
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use tempfile::{NamedTempFile, TempPath};
 
@@ -15,11 +15,16 @@ use zstd::stream::read::Decoder as ZstdDecoder;
 
 const BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
 
+/// Manages the lifetime of a decompressed image file.
+/// If the image was decompressed to a temp file, `_temp_handle` will
+/// hold the `TempPath`, and the file will be deleted on drop.
+/// If it was an uncompressed image, `_temp_handle` is None.
 struct DecompressedImage {
     path: PathBuf,
     _temp_handle: Option<TempPath>,
 }
 
+/// Allows `DecompressedImage` to be used as a simple `&Path`.
 impl AsRef<Path> for DecompressedImage {
     fn as_ref(&self) -> &Path {
         &self.path
@@ -38,6 +43,9 @@ fn make_progress_bar(len: u64, prefix: &str, color: &str) -> ProgressBar {
     pb
 }
 
+/// Decompresses an image file to a temporary file if needed.
+/// Returns a `DecompressedImage` struct which points to either
+/// the original file (if uncompressed) or the new temp file.
 fn decompress_image(input_path: &Path) -> io::Result<DecompressedImage> {
     let ext = input_path
         .extension()
@@ -47,10 +55,12 @@ fn decompress_image(input_path: &Path) -> io::Result<DecompressedImage> {
 
     let input_file = File::open(input_path)?;
 
+    // Create a reader based on the file extension
     let mut reader: Box<dyn Read> = match ext.as_str() {
         "gz" | "gzip" => Box::new(GzDecoder::new(BufReader::new(input_file))),
         "xz" => Box::new(XzDecoder::new(BufReader::new(input_file))),
         "zst" | "zstd" => Box::new(ZstdDecoder::new(BufReader::new(input_file))?),
+        // Not a compressed file, return a path to the original
         _ => {
             return Ok(DecompressedImage {
                 path: input_path.to_path_buf(),
@@ -61,6 +71,7 @@ fn decompress_image(input_path: &Path) -> io::Result<DecompressedImage> {
 
     let decompress_pb = ProgressBar::new_spinner();
     decompress_pb.set_prefix("Decompress");
+    // A custom spinner animation for decompression
     decompress_pb.set_style(
         ProgressStyle::default_spinner()
             .tick_strings(&[
@@ -232,6 +243,7 @@ fn decompress_image(input_path: &Path) -> io::Result<DecompressedImage> {
     );
     decompress_pb.enable_steady_tick(Duration::from_millis(100));
 
+    // Decompress to a named temp file
     let mut temp_file = NamedTempFile::new()?;
     {
         let mut writer = BufWriter::new(&mut temp_file);
@@ -258,13 +270,14 @@ fn decompress_image(input_path: &Path) -> io::Result<DecompressedImage> {
         .progress_chars("■■"),
     );
 
-    // Force the bar to full by syncing position to length (but keep counters!)
+    // Ensure the progress bar finishes at 100%
     if let Some(len) = decompress_pb.length() {
         decompress_pb.set_position(len);
     }
 
     decompress_pb.finish_with_message("✅ Decompression complete.");
 
+    // Hand over ownership of the temp file to the DecompressedImage struct
     let temp_path = temp_file.into_temp_path();
     Ok(DecompressedImage {
         path: temp_path.to_path_buf(),
@@ -285,13 +298,13 @@ pub fn run(image_path: &Path, device_path: &Path, verify: bool) -> Result<()> {
 
     let mut device_file = std::fs::OpenOptions::new()
         .write(true)
-        .custom_flags(libc::O_DIRECT)
+        .custom_flags(libc::O_DIRECT) // Use O_DIRECT for unbuffered I/O
         .open(device_path)?;
 
     let write_pb = make_progress_bar(image_len, "Writing", "green");
     let start_time = Instant::now();
 
-    // Align buffer to 512 bytes for O_DIRECT
+    // Align buffer to 512 bytes for O_DIRECT compatibility
     let block_size = 512;
     let mut buf = vec![0u8; BUFFER_SIZE + block_size];
     let offset = buf.as_ptr().align_offset(block_size);
@@ -302,6 +315,7 @@ pub fn run(image_path: &Path, device_path: &Path, verify: bool) -> Result<()> {
         let to_read = std::cmp::min(BUFFER_SIZE as u64, image_len - written) as usize;
         image_file.read_exact(&mut buffer[..to_read])?;
 
+        // Ensure the data chunk is a multiple of the block size
         let padded_size = if to_read % block_size != 0 {
             let pad = to_read.div_ceil(block_size) * block_size;
             buffer[to_read..pad].fill(0);

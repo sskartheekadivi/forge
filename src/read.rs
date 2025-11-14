@@ -1,6 +1,7 @@
 use std::fs::File;
 use std::io::{Read, Write};
 use std::os::unix::io::AsRawFd;
+use std::path::Path;
 use std::time::Instant;
 
 use anyhow::{Result, anyhow};
@@ -24,23 +25,17 @@ fn make_progress_bar(len: u64, prefix: &str) -> ProgressBar {
     pb
 }
 
-pub fn run(
-    device_path: Option<std::path::PathBuf>,
-    image_path: Option<std::path::PathBuf>,
-) -> Result<()> {
-    let device_path = device_path.ok_or_else(|| anyhow!("Missing device argument"))?;
-    let image_path = image_path.ok_or_else(|| anyhow!("Missing image argument"))?;
-
+pub fn run(device_path: &Path, image_path: &Path) -> Result<()> {
     println!(
         "Reading device \"{}\" to image \"{}\"",
         device_path.display(),
         image_path.display()
     );
 
-    // Open device for reading with O_DIRECT
+    // Open device for reading
     let mut device_file = std::fs::OpenOptions::new()
         .read(true)
-        // .custom_flags(libc::O_DIRECT)
+        // .custom_flags(libc::O_DIRECT) // O_DIRECT is optional
         .open(&device_path)?;
 
     // Use nix ioctl wrapper to get device size
@@ -69,10 +64,10 @@ pub fn run(
     while read_total < size_bytes {
         let to_read = std::cmp::min(BUFFER_SIZE as u64, size_bytes - read_total) as usize;
 
-        // Read into buffer
         device_file.read_exact(&mut buffer[..to_read])?;
 
-        // Pad write to file for O_DIRECT
+        // This code ensures the buffer is block-aligned,
+        // then writes the (potentially padded) buffer to the image file.
         let padded_size = if to_read % block_size != 0 {
             let pad = to_read.div_ceil(block_size) * block_size;
             buffer[to_read..pad].fill(0);
