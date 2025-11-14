@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::os::unix::fs::OpenOptionsExt;
-use std::path::Path;
+use std::path::{Path, PathBuf}; // Added PathBuf
 use std::time::{Duration, Instant};
 use tempfile::{NamedTempFile, TempPath};
 
@@ -15,6 +15,17 @@ use zstd::stream::read::Decoder as ZstdDecoder;
 
 const BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
 
+struct DecompressedImage {
+    path: PathBuf,
+    _temp_handle: Option<TempPath>,
+}
+
+impl AsRef<Path> for DecompressedImage {
+    fn as_ref(&self) -> &Path {
+        &self.path
+    }
+}
+
 fn make_progress_bar(len: u64, prefix: &str, color: &str) -> ProgressBar {
     let pb = ProgressBar::new(len);
     pb.set_prefix(format!("{prefix:<10}"));
@@ -27,7 +38,7 @@ fn make_progress_bar(len: u64, prefix: &str, color: &str) -> ProgressBar {
     pb
 }
 
-fn decompress_image(input_path: &Path) -> io::Result<TempPath> {
+fn decompress_image(input_path: &Path) -> io::Result<DecompressedImage> {
     let ext = input_path
         .extension()
         .and_then(|e| e.to_str())
@@ -41,7 +52,10 @@ fn decompress_image(input_path: &Path) -> io::Result<TempPath> {
         "xz" => Box::new(XzDecoder::new(BufReader::new(input_file))),
         "zst" | "zstd" => Box::new(ZstdDecoder::new(BufReader::new(input_file))?),
         _ => {
-            return Ok(TempPath::from_path(input_path));
+            return Ok(DecompressedImage {
+                path: input_path.to_path_buf(),
+                _temp_handle: None,
+            });
         }
     };
 
@@ -251,7 +265,11 @@ fn decompress_image(input_path: &Path) -> io::Result<TempPath> {
 
     decompress_pb.finish_with_message("✅ Decompression complete.");
 
-    Ok(temp_file.into_temp_path())
+    let temp_path = temp_file.into_temp_path();
+    Ok(DecompressedImage {
+        path: temp_path.to_path_buf(),
+        _temp_handle: Some(temp_path),
+    })
 }
 
 pub fn run(image_path: &Path, device_path: &Path, verify: bool) -> Result<()> {
@@ -261,8 +279,8 @@ pub fn run(image_path: &Path, device_path: &Path, verify: bool) -> Result<()> {
         device_path.display()
     );
 
-    let temp_path = decompress_image(image_path)?;
-    let mut image_file = File::open(&temp_path)?;
+    let image = decompress_image(image_path)?;
+    let mut image_file = File::open(&image)?;
     let image_len = image_file.metadata()?.len();
 
     let mut device_file = std::fs::OpenOptions::new()
@@ -317,7 +335,7 @@ pub fn run(image_path: &Path, device_path: &Path, verify: bool) -> Result<()> {
 
     // --- Verification ---
     if verify {
-        let mut image_file = File::open(temp_path)?;
+        let mut image_file = File::open(&image)?;
         let mut device_file = File::open(device_path)?;
 
         let verify_pb = make_progress_bar(image_len, "Verifying", "magenta");
