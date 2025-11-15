@@ -2,17 +2,21 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::os::unix::io::AsRawFd;
 use std::path::Path;
+use std::time::Instant;
+
+// Required for .custom_flags(libc::O_DIRECT)
+use std::os::unix::fs::OpenOptionsExt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Instant;
 
 use anyhow::{Result, anyhow};
 use indicatif::{ProgressBar, ProgressStyle};
 use nix::ioctl_read;
 
-const BUFFER_SIZE: usize = 1024 * 1024; // 1 MiB
+// Use a 1 MiB buffer for I/O operations.
+const BUFFER_SIZE: usize = 1024 * 1024;
 
-// Define ioctl_read for BLKGETSIZE64 (returns u64 device size in bytes)
+// Define the `nix` ioctl for `BLKGETSIZE64` (u64 device size in bytes).
 ioctl_read!(blkgetsize64, 0x12, 114, u64);
 
 fn make_progress_bar(len: u64, prefix: &str) -> ProgressBar {
@@ -37,16 +41,19 @@ pub fn run(device_path: &Path, image_path: &Path, running: Arc<AtomicBool>) -> R
     // Open device for reading
     let mut device_file = std::fs::OpenOptions::new()
         .read(true)
-        // .custom_flags(libc::O_DIRECT) // O_DIRECT is optional
+        // Use O_DIRECT to bypass the kernel page cache for raw, high-speed I/O.
+        .custom_flags(libc::O_DIRECT)
         .open(&device_path)?;
 
-    // Use nix ioctl wrapper to get device size
+    // Get the device size in bytes using ioctl. This is more reliable
+    // than seeking for block devices.
     let fd = device_file.as_raw_fd();
     let mut size_bytes: u64 = 0;
     unsafe {
         blkgetsize64(fd, &mut size_bytes)?;
     }
 
+    // Abort if the device reports zero size (e.g., empty card reader).
     if size_bytes == 0 {
         return Err(anyhow!("Device size is reported as zero"));
     }
@@ -56,7 +63,8 @@ pub fn run(device_path: &Path, image_path: &Path, running: Arc<AtomicBool>) -> R
     let read_pb = make_progress_bar(size_bytes, "Reading");
     let start_time = Instant::now();
 
-    // Align buffer to 512 bytes for O_DIRECT
+    // O_DIRECT requires buffers to be memory-aligned to the block size.
+    // We create a buffer with extra capacity and then get an aligned slice from it.
     let block_size = 512;
     let mut buf = vec![0u8; BUFFER_SIZE + block_size];
     let offset = buf.as_ptr().align_offset(block_size);
@@ -64,10 +72,11 @@ pub fn run(device_path: &Path, image_path: &Path, running: Arc<AtomicBool>) -> R
 
     let mut read_total: u64 = 0;
     while read_total < size_bytes {
+        // Check for Ctrl+C signal for graceful shutdown.
         if !running.load(Ordering::SeqCst) {
             read_pb.println("Received exit signal... cleaning up.");
-            read_pb.finish_with_message("Read cancelled.");
-            // We need to clean up the partially written image file
+            read_pb.finish_with_message("❌ Read cancelled.");
+            // Clean up the partial image file on cancellation.
             std::fs::remove_file(image_path)?;
             return Err(anyhow!("Operation cancelled by user"));
         }
@@ -76,17 +85,11 @@ pub fn run(device_path: &Path, image_path: &Path, running: Arc<AtomicBool>) -> R
 
         device_file.read_exact(&mut buffer[..to_read])?;
 
-        // This code ensures the buffer is block-aligned,
-        // then writes the (potentially padded) buffer to the image file.
-        let padded_size = if to_read % block_size != 0 {
-            let pad = to_read.div_ceil(block_size) * block_size;
-            buffer[to_read..pad].fill(0);
-            pad
-        } else {
-            to_read
-        };
+        // Write *only* the bytes read. Do not write the full buffer,
+        // as the last chunk will be partial and uninitialized data
+        // from the buffer would corrupt the image.
+        image_file.write_all(&buffer[..to_read])?;
 
-        image_file.write_all(&buffer[..padded_size])?;
         read_total += to_read as u64;
         read_pb.set_position(read_total);
     }
