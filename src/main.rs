@@ -1,7 +1,13 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use console::style;
+use libc::ECHOCTL;
+use std::io::{IsTerminal, stdout};
+use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use termios::{TCSANOW, Termios, tcsetattr};
 
 mod device;
 mod read;
@@ -37,7 +43,62 @@ enum Commands {
     List,
 }
 
+struct TermRestorer {
+    original_termios: Option<Termios>,
+}
+
+impl TermRestorer {
+    fn new() -> Self {
+        let fd = stdout().as_raw_fd();
+        if !stdout().is_terminal() {
+            return Self {
+                original_termios: None,
+            };
+        }
+
+        if let Ok(original_termios) = Termios::from_fd(fd) {
+            let mut new_termios = original_termios;
+            new_termios.c_lflag &= !ECHOCTL;
+
+            if tcsetattr(fd, TCSANOW, &new_termios).is_ok() {
+                Self {
+                    original_termios: Some(original_termios),
+                }
+            } else {
+                Self {
+                    original_termios: None,
+                }
+            }
+        } else {
+            Self {
+                original_termios: None,
+            }
+        }
+    }
+}
+
+impl Drop for TermRestorer {
+    fn drop(&mut self) {
+        if let Some(ref original_termios) = self.original_termios {
+            let fd = stdout().as_raw_fd();
+            tcsetattr(fd, TCSANOW, original_termios).ok();
+        }
+    }
+}
+
 fn main() -> Result<()> {
+    // This guard will be dropped when main() exits, restoring the terminal
+    let _term_restorer = TermRestorer::new();
+
+    // Atomic boolean flag to signal termination
+    let running = Arc::new(AtomicBool::new(true));
+    let r = running.clone();
+
+    // Set up the Ctrl+C handler
+    ctrlc::set_handler(move || {
+        r.store(false, Ordering::SeqCst);
+    })?;
+
     let cli = Cli::parse();
 
     match cli.command {
@@ -65,7 +126,7 @@ fn main() -> Result<()> {
             }
 
             println!();
-            write::run(&image, &device.path, !no_verify)?;
+            write::run(&image, &device.path, !no_verify, running.clone())?;
             println!(
                 "\n✨ Successfully flashed {} with {}.",
                 style(device.path.display()).cyan(),
@@ -94,7 +155,7 @@ fn main() -> Result<()> {
             }
 
             println!();
-            read::run(&device.path, &image)?;
+            read::run(&device.path, &image, running.clone())?;
             println!(
                 "\n✨ Successfully read {} to {}.",
                 style(device.path.display()).cyan(),

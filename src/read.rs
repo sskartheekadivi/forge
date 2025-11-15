@@ -2,6 +2,8 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::os::unix::io::AsRawFd;
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use anyhow::{Result, anyhow};
@@ -25,7 +27,7 @@ fn make_progress_bar(len: u64, prefix: &str) -> ProgressBar {
     pb
 }
 
-pub fn run(device_path: &Path, image_path: &Path) -> Result<()> {
+pub fn run(device_path: &Path, image_path: &Path, running: Arc<AtomicBool>) -> Result<()> {
     println!(
         "Reading device \"{}\" to image \"{}\"",
         device_path.display(),
@@ -62,6 +64,14 @@ pub fn run(device_path: &Path, image_path: &Path) -> Result<()> {
 
     let mut read_total: u64 = 0;
     while read_total < size_bytes {
+        if !running.load(Ordering::SeqCst) {
+            read_pb.println("Received exit signal... cleaning up.");
+            read_pb.finish_with_message("Read cancelled.");
+            // We need to clean up the partially written image file
+            std::fs::remove_file(image_path)?;
+            return Err(anyhow!("Operation cancelled by user"));
+        }
+
         let to_read = std::cmp::min(BUFFER_SIZE as u64, size_bytes - read_total) as usize;
 
         device_file.read_exact(&mut buffer[..to_read])?;

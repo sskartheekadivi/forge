@@ -2,6 +2,8 @@ use std::fs::File;
 use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use tempfile::{NamedTempFile, TempPath};
 
@@ -46,7 +48,7 @@ fn make_progress_bar(len: u64, prefix: &str, color: &str) -> ProgressBar {
 /// Decompresses an image file to a temporary file if needed.
 /// Returns a `DecompressedImage` struct which points to either
 /// the original file (if uncompressed) or the new temp file.
-fn decompress_image(input_path: &Path) -> io::Result<DecompressedImage> {
+fn decompress_image(input_path: &Path, running: Arc<AtomicBool>) -> io::Result<DecompressedImage> {
     let ext = input_path
         .extension()
         .and_then(|e| e.to_str())
@@ -251,6 +253,17 @@ fn decompress_image(input_path: &Path) -> io::Result<DecompressedImage> {
         let mut total: u64 = 0;
 
         loop {
+            if !running.load(Ordering::SeqCst) {
+                decompress_pb.println("Received exit signal... cleaning up.");
+                decompress_pb.finish_with_message("❌ Decompression cancelled.");
+                // Return an Interrupted error. This will cause the NamedTempFile
+                // to be dropped, cleaning up the file automatically.
+                return Err(io::Error::new(
+                    io::ErrorKind::Interrupted,
+                    "Operation cancelled by user",
+                ));
+            }
+
             let n = reader.read(&mut buffer)?;
             if n == 0 {
                 break;
@@ -285,14 +298,30 @@ fn decompress_image(input_path: &Path) -> io::Result<DecompressedImage> {
     })
 }
 
-pub fn run(image_path: &Path, device_path: &Path, verify: bool) -> Result<()> {
+pub fn run(
+    image_path: &Path,
+    device_path: &Path,
+    verify: bool,
+    running: Arc<AtomicBool>,
+) -> Result<()> {
     println!(
         "Writing image \"{}\" to device \"{}\"",
         image_path.display(),
         device_path.display()
     );
 
-    let image = decompress_image(image_path)?;
+    let image = match decompress_image(image_path, running.clone()) {
+        Ok(img) => img,
+        Err(e) if e.kind() == io::ErrorKind::Interrupted => {
+            // This is our custom cancellation error
+            return Err(anyhow!("Operation cancelled by user"));
+        }
+        Err(e) => {
+            // This is a real IO error
+            return Err(e.into());
+        }
+    };
+
     let mut image_file = File::open(&image)?;
     let image_len = image_file.metadata()?.len();
 
@@ -312,6 +341,13 @@ pub fn run(image_path: &Path, device_path: &Path, verify: bool) -> Result<()> {
 
     let mut written: u64 = 0;
     while written < image_len {
+        if !running.load(Ordering::SeqCst) {
+            write_pb.println("Received exit signal... cleaning up.");
+            write_pb.finish_with_message("❌ Write cancelled.");
+            // Return error. 'image' will be dropped, cleaning up the temp file.
+            return Err(anyhow!("Operation cancelled by user"));
+        }
+
         let to_read = std::cmp::min(BUFFER_SIZE as u64, image_len - written) as usize;
         image_file.read_exact(&mut buffer[..to_read])?;
 
@@ -363,6 +399,13 @@ pub fn run(image_path: &Path, device_path: &Path, verify: bool) -> Result<()> {
 
         let mut remaining = image_len;
         while remaining > 0 {
+            if !running.load(Ordering::SeqCst) {
+                verify_pb.println("Received exit signal... cleaning up.");
+                verify_pb.finish_with_message("❌ Verification cancelled.");
+                // Return error. 'image' will be dropped, cleaning up the temp file.
+                return Err(anyhow!("Operation cancelled by user"));
+            }
+
             let chunk = std::cmp::min(BUFFER_SIZE as u64, remaining) as usize;
             image_file.read_exact(&mut image_buf[..chunk])?;
             device_file.read_exact(&mut device_buf[..chunk])?;
