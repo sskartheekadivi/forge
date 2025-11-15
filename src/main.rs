@@ -14,7 +14,7 @@ mod read;
 mod write;
 
 #[derive(Parser)]
-#[command(name = "forge")]
+#[command(name = "etchr")]
 #[command(about = "A safe, interactive disk imaging tool", version)]
 struct Cli {
     #[command(subcommand)]

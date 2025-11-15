@@ -1,11 +1,11 @@
 [package]
-name = "forge"
+name = "etchr"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
-description = "A fast, safe image flasher for SD cards and USB drives."
+description = "A fast, safe, and interactive CLI for flashing disk images."
 readme = "README.md"
-repository = "https://github.com/sskartheekadivi/forge"
+repository = "https://github.com/sskartheekadivi/etchr"
 keywords = ["flasher", "usb", "sdcard", "image", "cli"]
 categories = ["command-line-utilities", "hardware-support"]
 

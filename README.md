@@ -1,61 +1,136 @@
-# Forge
+# etchr
 
-A fast, no-nonsense Rust CLI tool to write and read disk images on Linux. Perfect for flashing SD cards, USB drives, and similar devices with progress and verification.
+<p align="center">
+  </p>
 
-## Features
+<h3 align="center">A fast, safe, and interactive CLI for flashing disk images.</h3>
 
-- Write raw disk images to devices  
-- Read full devices to image files  
-- Automatic verification after writing (optional skip)  
-- Real-time progress bars with speed and ETA  
-- Safe, clear error messages  
+<p align="center">
+  Tired of cryptic `dd` commands? Worried you'll accidentally wipe your system drive?
+  <br />
+  <code>etchr</code> is a modern, reliable tool that makes flashing SD cards and USB drives simple and safe, right from your terminal.
+</p>
 
-## Usage
+<p align="center">
+  
+</p>
 
+---
+
+## ✨ Features
+
+* **🛡️ Interactive Safety First**
+    `etchr` doesn't let you pass a device path. Instead, it shows an interactive menu of **only removable devices**, making it nearly impossible to flash your system drive by mistake.
+
+* **🚀 Decompression On-the-Fly**
+    Automatically decompresses `.gz`, `.xz`, and `.zst` images while writing. No need to extract them first.
+
+* **⚡ Blazingly Fast**
+    Optimized for high-speed, unbuffered I/O to flash images as fast as your hardware allows, often faster than GUI-based tools.
+
+* **✅ Guaranteed Verification**
+    Automatically verifies the disk with a SHA256 hash after writing to ensure the data is perfect, bit-for-bit. (You can skip this with `--no-verify`).
+
+* **📊 Detailed Progress**
+    A beautiful progress bar shows your speed, data transferred, and ETA, so you're never left guessing.
+
+* **🛑 Graceful Cancel**
+    Press `Ctrl+C` at any time to safely cancel the operation. `etchr` cleans up after itself, leaving no temporary files or half-written states.
+
+## 🚀 Installation
+
+### 1. With `cargo` (Recommended)
+This is the easiest way to get the latest version if you have the Rust toolchain.
 ```bash
-# Write image to device with verification
-sudo forge write image.img /dev/sdX
-
-# Write image skipping verification
-sudo forge write image.img /dev/sdX --no-verify
-
-# Read device to image file
-sudo forge read /dev/sdX backup.img
-````
-
-## Installation
-
-Coming soon via:
-
-- `cargo install forge`
-- `.deb` package (from official PPA, eventually)
-
-For now, you can build it from source:
-```bash
-git clone https://github.com/sskartheekadivi/forge.git
-cd forge
-cargo build --release
-./target/release/forge write <image> <device>  
+cargo install etchr
 ```
 
-No dependencies beyond Rust and a sane Linux system.
+### 2. From GitHub Releases
+Download the pre-compiled binary or `.deb` package from the [Releases page](https://github.com/sskartheekadivi/etchr/releases).
+```bash
+# For .deb packages
+sudo dpkg -i ./etchr_1.0.0_amd64.deb
+```
 
-## Planned Features
+### 3. From Source
+```bash
+git clone [https://github.com/sskartheekadivi/etchr.git](https://github.com/sskartheekadivi/etchr.git)
+cd etchr
+cargo build --release
+sudo cp ./target/release/etchr /usr/local/bin/
+```
 
-* Support for compressed images (`.gz`, `.xz`, `.zst`)
-* Multi-device flashing (serial and parallel)
-* Smarter image reading with size optimization
-* Safety checks and device listing
-* Official Debian package and GUI frontend
+## 💡 Usage
 
-## License
+`etchr` is designed to be simple. The commands guide you.
 
-MIT
+### `etchr list`
+List all detected removable devices and their mount points.
+```
+$ etchr list
+Found 1 removable devices:
+
+  DEVICE       NAME                 SIZE LOCATION
+  ----------   -----------------   ----- ----------
+  /dev/sdd     Cruzer Blade       29.5 GB /media/user/USB_DISK
+```
+
+### `etchr write`
+Write an image to a device. You will be prompted to select a target from a safe, interactive list.
+```bash
+# You can use compressed or uncompressed images
+etchr write ~/Downloads/raspberry-pi-os.img.xz
+```
+This will start the interactive prompt:
+```
+✔ Select the target device to WRITE to · /dev/sdd     29.5 GB [Mounted at /media/user/USB_DISK]
+WARNING: This will erase all data on 'sdd' (29.5 GB).
+  Device: /dev/sdd
+  Image:  /home/user/Downloads/raspberry-pi-os.img.xz
+
+✔ Are you sure you want to proceed? · yes
+
+Writing image...
+Decompress [■■■■■■■■■■■■■■■■■] 1.53 GiB (150.37 MiB/s)
+Writing    [■■■■■■■■■■■■■■■■■] 8.00 GiB (90.12 MiB/s)
+Verifying  [■■■■■■■■■■■■■■■■■] 8.00 GiB (133.33 MiB/s)
+
+✨ Successfully flashed /dev/sdd with raspberry-pi-os.img.xz.
+```
+
+**Options:**
+* `--no-verify`: Skips the verification step after writing.
+
+### `etchr read`
+Create an image file by reading an entire device. You will be prompted to select a source.
+```bash
+etchr read ~/Backups/my-sd-card-backup.img
+```
+This will start the interactive prompt:
+```
+✔ Select the source device to READ from · /dev/sdd     29.5 GB [Mounted at /media/user/USB_DISK]
+This will read 29.5 GB from 'sdd'.
+  Device: /dev/sdd
+  Output: /home/user/Backups/my-sd-card-backup.img
+
+✔ Are you sure you want to proceed? · yes
+
+Reading    [■■■■■■■■■■■■■■■■■] 29.5 GiB (100.0 MiB/s)
+
+✨ Successfully read /dev/sdd to my-sd-card-backup.img.
+```
+
+## 🗺️ Roadmap
+
+`etchr` is already a powerful tool, but here's what's planned:
+
+* [ ] Smarter reading (e.g., only reading partitions, not the whole empty disk).
+* [ ] Multi-write: Flashing one image to multiple devices at once.
+* [ ] A (separate) optional GUI frontend.
 
 ## Contributing
 
-We welcome contributions — especially bug reports, focused pull requests, and real-world feedback from people flashing actual devices. If you’ve got something to improve, open an issue or send a PR.
+Contributions are welcome! Whether it's a bug report, a feature idea, or a pull request, feel free to open an issue or start a discussion.
 
-## Warning
-
-Forge writes directly to devices. It can and will erase your data if used incorrectly. Always double-check your device paths (`/dev/sdX`) — Forge assumes you know what you're doing.
+## License
+This project is licensed under the MIT License.

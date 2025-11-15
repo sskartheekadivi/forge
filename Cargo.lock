@@ -267,6 +267,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "etchr"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "console",
+ "ctrlc",
+ "dialoguer",
+ "flate2",
+ "indicatif",
+ "libc",
+ "nix",
+ "sha2",
+ "sysinfo",
+ "tempfile",
+ "termios",
+ "xz2",
+ "zstd",
+]
+
+[[package]]
 name = "fastrand"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -286,27 +307,6 @@ checksum = "bfe33edd8e85a12a67454e37f8c75e730830d83e313556ab9ebf9ee7fbeb3bfb"
 dependencies = [
  "crc32fast",
  "miniz_oxide",
-]
-
-[[package]]
-name = "forge"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "console",
- "ctrlc",
- "dialoguer",
- "flate2",
- "indicatif",
- "libc",
- "nix",
- "sha2",
- "sysinfo",
- "tempfile",
- "termios",
- "xz2",
- "zstd",
 ]
 
 [[package]]
